@@ -1,0 +1,127 @@
+---
+title: "jitter plot speicific peaks"
+author: "Yi Ding"
+date: "12/14/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import and Plot the bootstrap results.
+
+Use subclass cell specific peaks to find the overlap with repetitive elements in the genome and calculate the enrichment score based on random chance.
+
+```{r cars}
+rm(list=ls())
+setwd("/Users/shding/Dropbox/Overlap_RepeatElements_scripts/subclass_specific_peaks")
+## import bootstrap data in excel obtained by using calculate_mean_std_from_bootstrap_specificPeaks.R
+## The following is trying to reformat the data to include columns like Species, Name, Cell_subclass, Peakset_type.
+new_allInOne <- read.table("specific_STD_MEAN_includeShuffle_matrix.xls", sep = "\t", header = T)
+new_allInOne <- cbind(Name = rownames(new_allInOne),new_allInOne)
+rownames(new_allInOne) <- NULL
+list_of_strings <- stringr::str_split(new_allInOne$Name, "_")
+Species <- character(length = length(list_of_strings))
+Cell_subclass <- character(length = length(list_of_strings))
+Peakset_type <- character(length = length(list_of_strings))
+for (i in seq_along(list_of_strings)){
+  if ( grepl("^h",list_of_strings[[i]][1]) ){
+    Species_temp <- c("Human")
+  } else{
+    Species_temp <- c("Mouse")
+  }
+  Cell_subclass_temp <- c(substring(list_of_strings[[i]][1],2))
+  Peakset_type_temp <- c(list_of_strings[[i]][2])
+  Species[i] <- Species_temp
+  Cell_subclass[i] <- Cell_subclass_temp
+  Peakset_type[i] <- Peakset_type_temp
+}
+new_allInOne <- cbind(Name = new_allInOne$Name,Species, Cell_subclass, Peakset_type, new_allInOne[,c(2:ncol(new_allInOne))])
+### Until this step, the right format of specific_STD_MEAN_includeShuffle_matrix is good for following manipulation.
+
+library(reshape)
+library(tibble)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+
+av_cols = c(seq(5,31,2))
+sd_cols = c(seq(6,32,2))
+#split into two for avs and sds
+avs = new_allInOne[,c(1:4,av_cols)]
+sds = new_allInOne[,c(1:4,sd_cols)]
+# calculate enrichment (%overlap for real data/ %overlap for shuffed data) and create a new matrix only contains enrichment.
+# generate an empty matrix to hold data in the for loop.
+enrichment_matrix = matrix(nrow= nrow(avs), ncol = 7)
+# generate an empty vector with characters to save column names in the for loop.
+colnames_enrichment = vector(mode="character", length=7) 
+for (i in 5:11){
+  enrichment_matrix[,i-4] = avs[,i]/avs[,i+7]
+  colnames_enrichment[i-4] = paste0(gsub("intsxns100xCounts_.*$","", colnames(avs)[i]))
+}
+colnames(enrichment_matrix) = colnames_enrichment
+enrichment_df <- cbind(avs[,c(1:4)], enrichment_matrix)
+## create new dataset without missing data and only contains conserved and divergent peak types.
+enrichment_df_ConDiv <- filter(enrichment_df, Name != "mL56IT_Con" & Name != "hL56IT_Con" & Peakset_type != "All")
+sds <- filter(sds, Name != "mL56IT_Con" & Name != "hL56IT_Con" & Peakset_type != "All")
+#format the data using melt function.
+# melt function comes from the Reshape Package. Change multivariate format into univariate format (X1,X2,X3).
+enrichment_melt <- melt(data.frame(enrichment_df_ConDiv))
+colnames(enrichment_melt)[c(5,6)] <- c("Repetitive_element_type", "Enrichment_value")
+
+sds_melt = melt(data.frame(sds))
+
+```
+
+## Including Plots
+
+The following figures are different version of jitter plots.
+
+```{r ggplot2, echo=TRUE, message = FALSE}
+# Option 1: position dodge: seperate conserved and divergent groups. No distinction among cell subclasses.
+(hp1 <- ggplot(filter(enrichment_melt, Species == "Human"), 
+            aes(x = Repetitive_element_type, y = Enrichment_value, 
+                color = Peakset_type, shape = Peakset_type)) +
+  geom_jitter(position=position_dodge(0.8)) +
+  stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+                geom = "crossbar", width = 0.5) + 
+  labs(title="Human Peaks",x="Repetitive element types", y = "Enrichment"))
+
+# Option 2: change the position jitter 0.2 : degree of jitter in x direction. No distinction among cell subclasses.
+(hpp1 <- ggplot(filter(enrichment_melt, Species == "Human"), 
+              aes(x = Repetitive_element_type, y = Enrichment_value, 
+                  color = Peakset_type, shape = Peakset_type)) +
+    geom_jitter(position=position_jitter(0.2)) +
+    stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+                 geom = "crossbar", width = 0.5) + 
+    labs(title="Human Peaks",x="Repetitive element types", y = "Enrichment"))
+
+# Option 3: Add box plots and change the position. No distinction among cell subclasses.
+(hppp1 <- ggplot(filter(enrichment_melt, Species == "Human"), 
+               aes(x = Repetitive_element_type, y = Enrichment_value, 
+                   color = Peakset_type)) +
+    geom_jitter(position = position_dodge(0.8)) +
+    geom_boxplot(position = position_dodge(0.8)) + 
+    labs(title="Human Peaks",x="Repetitive element types", y = "Enrichment"))
+
+## Option 4: need a function to change the color of stat_summary crossbar to distinguish conserved and divergent.
+(hp2 <- ggplot(filter(enrichment_melt, Species == "Human"), 
+             aes(x = Repetitive_element_type, y = Enrichment_value, shape = Peakset_type)) +
+    geom_jitter(aes( color = Cell_subclass), position=position_jitter(0.2)) + 
+  stat_summary(fun.y = mean, 
+               fun.ymin = mean, fun.ymax = mean, geom = "crossbar", width = 0.5) + 
+    labs(title="Human Peaks",x="Repetitive element types", y = "Enrichment"))
+
+# Mouse peaks option 1: position dodge: seperate conserved and divergent groups. No distinction among cell subclasses.
+(mp1 <- ggplot(filter(enrichment_melt, Species == "Mouse"), 
+            aes(x = Repetitive_element_type, y = Enrichment_value, 
+                color = Peakset_type, shape = Peakset_type)) +
+  geom_jitter(position=position_dodge(0.8)) +
+  stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+                geom = "crossbar", width = 0.5) + 
+  labs(title="Mouse Peaks",x="Repetitive element types", y = "Enrichment"))
+```
+
+
+Need to change parameters of option 4! And decide the best format to use. 
